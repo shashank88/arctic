@@ -1,5 +1,7 @@
+import hashlib
 import logging
 import sys
+from datetime import datetime
 from functools import wraps
 from time import sleep
 
@@ -77,3 +79,39 @@ def _handle_error(f, e, retry_count, **kwargs):
 #    if 'unauthorized' in str(e):
 #        raise
     sleep(0.01 * min((3 ** retry_count), 50))  # backoff...
+
+
+def mongo_memoize(mongo_conn, ttl=60*60, prefix='memoize'):
+    """
+    Decorators that uses mongo to cache the return values of a function for the provided ttl.
+
+    :param mongo_conn: Mongo connection object
+    :param ttl: Total time to cache the libraries.
+    :param prefix: prefix for the collection that stores cache data in mongo.
+    :return: Decorated function that will execute if the data is not present
+    in the collection or the cached value is returned. Note: The return value
+    of the function must be trivially serializable by mongo.
+    """
+    def decorator(func):
+        col_name = '{}_{}_{}'.format(prefix, func.__name__, hashlib.md5(func.__module__).hexdigest())
+        mongo_db = mongo_conn.memoize_db
+        if col_name not in mongo_db.collection_names():
+            new_collection = mongo_db.create_collection(col_name)
+            new_collection.create_index("date", expireAfterSeconds=ttl)
+
+        cache_col = mongo_db[col_name]
+
+        @wraps(func)
+        def memoized_f(*args, **kwargs):
+            coll_data = cache_col.find_one()
+            if coll_data:
+                return coll_data['cached_data']
+            ret = func(*args, **kwargs)
+            cache_col.remove({})
+            # TODO: Check if ret is serializable to BSON by mongo.
+            cache_col.insert({"date": datetime.utcnow(), "cached_data": ret})
+            return ret
+
+        return memoized_f
+
+    return decorator

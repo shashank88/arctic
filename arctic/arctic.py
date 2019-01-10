@@ -10,7 +10,7 @@ from six import string_types
 from ._util import indent
 from .auth import authenticate, get_auth
 from .chunkstore import chunkstore
-from .decorators import mongo_retry
+from .decorators import mongo_retry, mongo_memoize
 from .exceptions import LibraryNotFoundException, ArcticException, QuotaExceededException
 from .hooks import get_mongodb_uri
 from .store import version_store, bson_store, metadata_store
@@ -201,6 +201,16 @@ class Arctic(object):
                     if coll.endswith(self.METADATA_COLL):
                         libs.append(coll[:-1 * len(self.METADATA_COLL) - 1])
         return libs
+
+    @mongo_retry
+    @mongo_memoize(mongo_conn=self._conn, ttl=3600)
+    def list_libraries_cached(self):
+        """
+        Returns
+        -------
+        list of Arctic library names from a cached collection in mongo
+        """
+        return self.list_libraries()
 
     def library_exists(self, library):
         """
