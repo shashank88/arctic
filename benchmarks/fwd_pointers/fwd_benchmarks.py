@@ -14,6 +14,23 @@ import arctic
 from arctic import Arctic
 from arctic._config import FwPointersCfg
 
+price_template = (800.0, 1200.0)
+
+ONE_MIN_ATTRIBUTESS = {
+    'BID': price_template,
+    'BID_TWAP': price_template,
+    'ASK': price_template,
+    'ASK_TWAP': price_template,
+    'HIGH': price_template,
+    'LOW': price_template,
+    'CLOSE': price_template,
+    'TWAP': price_template,
+    'ASKSIZE': (0.0, 400.0),
+    'BIDSIZE': (0.0, 400.0),
+    'TICK_COUNT': (1.0, 50.0),
+    'VOLUME': (0.0, 1000.0)
+}
+
 
 class FwPointersCtx:
     def __init__(self, value_to_test, do_reconcile=False):
@@ -26,6 +43,9 @@ class FwPointersCtx:
 
         self.reconcile_orig_value = arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE
         arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE = self.do_reconcile
+
+        print(arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE)
+        print(arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_CFG)
 
     def __exit__(self, *args):
         arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_CFG = self.orig_value
@@ -59,105 +79,80 @@ def gen_sparse_rows_for_range(n_rows, low, high, dense):
         rows.extend([value] * repetitions)
         current += repetitions
 
-    print('lensparse=', len(rows))
     return rows
 
 
 def gen_one_minute_rows(n_rows, dense):
-    price_template = (800.0, 1200.0)
-    header_attributes = {
-        'BID': price_template,
-        'BID_TWAP': price_template,
-        'ASK': price_template,
-        'ASK_TWAP': price_template,
-        'HIGH': price_template,
-        'LOW': price_template,
-        'CLOSE': price_template,
-        'TWAP': price_template,
-        'ASKSIZE': (0.0, 400.0),
-        'BIDSIZE': (0.0, 400.0),
-        'TICK_COUNT': (1.0, 50.0),
-        'VOLUME': (0.0, 1000.0)
-    }
-
     data = {}
-    for header, header_range in header_attributes.iteritems():
+    for header, header_range in ONE_MIN_ATTRIBUTESS.iteritems():
         data[header] = gen_sparse_rows_for_range(n_rows, header_range[0], header_range[1], dense)
 
-    print(len(data), len(data['BID']))
     return data
 
 
-def gen_broad_dataset(size, dense):
-    timestamps = list(rrule(DAILY, count=size, dtstart=dt(1970, 1, 1), interval=1))
+def gen_equity_dataset(n_row, n_col, dense):
+    timestamps = list(rrule(DAILY, count=n_row, dtstart=dt(2005, 1, 1), interval=1))
     df = pd.DataFrame(
         index=timestamps,
-        data={'BENCH' + str(i): gen_column(size, dense) for i in range(size)},
+        data={'BENCH' + str(i): gen_column(n_row, dense) for i in range(n_col)},
     )
     df.index.name = 'index'
     return df
 
 
-def gen_oneminute_dataset(size, dense):
+def gen_oneminute_dataset(n_row, n_col, dense):
     timestamps = []
     active_minutes_daily = 120
-    # 6 months of 2 hour data minute each
-    for day in range(0, size // 120):
+    for day in range(0, n_row // 120):
         timestamps.extend(list(rrule(MINUTELY, count=active_minutes_daily, dtstart=dt(2005, 1, 1) + td(days=day))))
 
-    timestamps.extend(list(rrule(MINUTELY, count=size % active_minutes_daily, dtstart=dt(2006, 1, 1))))
-    rows = len(timestamps)
-    print('len n_rows=', rows)
+    timestamps.extend(list(rrule(
+        MINUTELY,
+        count=n_row % active_minutes_daily,
+        dtstart=dt(random.randrange(2006, 2016), 1, 1)),
+    ))
 
     return pd.DataFrame(
         index=timestamps,
-        data=gen_one_minute_rows(rows, dense)
+        data=gen_one_minute_rows(n_row, dense)
     )
 
 
-def initialize_random_data(config, args, data_gen):
+def lib_name_from_args(config, data_gen):
+    return 'bench_{cfg}_{gen}'.format(
+        cfg=config.name,
+        gen=data_gen.__name__
+    )
+
+
+def insert_random_data(config, args, data_gen):
     store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = 'bench' + str(config.name)
+    lib_name = lib_name_from_args(config, data_gen)
     store.delete_library(lib_name)
     store.initialize_library(lib_name, segment='month')
     lib = store[lib_name]
 
     for sym in range(args.symbols):
-        lib.write('sym' + str(sym), data_gen(args.ndim, args.dense))
+        df = data_gen(n_row=args.ndim, n_col=args.ndim, dense=args.dense)
+        lib.write('sym' + str(sym), df)
 
 
-def append_random_rows(config, args):
+def append_random_rows(config, args, data_gen):
     store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = 'bench' + config.name
+    lib_name = lib_name_from_args(config, data_gen)
+
     lib = store[lib_name]
 
-    timestamps = list(rrule(DAILY, count=args.appends, dtstart=dt(1980, 1, 1), interval=1))
-
-    for day in range(args.appends):
+    for _ in range(args.appends):
         for sym in range(args.symbols):
-            df = pd.DataFrame(
-                index=[timestamps[day]],
-                data={'BENCH' + str(i): gen_sparse_col_data(1) for i in range(args.ndim)},
-            )
+            df = data_gen(n_row=1, n_col=args.ndim, dense=False)
             lib.append('sym' + str(sym), df)
 
 
-def append_random_rows_2(config, args):
+def read_all_symbols(config, args, data_gen):
     store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = 'bench' + config.name
-    lib = store[lib_name]
+    lib_name = lib_name_from_args(config, data_gen)
 
-    # timestamps = list(rrule(DAILY, count=args.appends, dtstart=dt(1980, 1, 1), interval=1))
-
-    for day in range(args.appends):
-        for sym in range(args.symbols):
-            df = gen_oneminute_dataset(1, False)
-            lib.append('sym' + str(sym), df)
-
-
-def read_all_symbols(config, args):
-    store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = 'bench' + config.name
     lib = store[lib_name]
 
     for sym in range(args.symbols):
@@ -178,29 +173,38 @@ def parse_args():
 
 
 def main(args):
-    print('args=', args)
+    measure = []
+    data_generators = [
+        gen_oneminute_dataset,
+        gen_equity_dataset,
+    ]
+    print('Arguments=', args)
     for rounds in range(1, args.rounds + 1):
-        for fwd_ptr in [FwPointersCfg.DISABLED, FwPointersCfg.ENABLED]:
-            for data_gen in (gen_oneminute_dataset, gen_broad_dataset):
+        for data_gen in data_generators:
+            for fwd_ptr in [FwPointersCfg.DISABLED, FwPointersCfg.ENABLED]:
                 with FwPointersCtx(fwd_ptr):
                     w_start = dt.now()
                     # Writes data to lib with above config.
-                    initialize_random_data(fwd_ptr, args, data_gen)
+                    insert_random_data(fwd_ptr, args, data_gen)
                     w_end = dt.now()
                     # Appends multiple rows to each symbol
-                    append_random_rows_2(fwd_ptr, args)
+
+                    append_random_rows(fwd_ptr, args, data_gen)
                     a_end = dt.now()
                     # Read everything.
-                    read_all_symbols(fwd_ptr, args)
+                    read_all_symbols(fwd_ptr, args, data_gen)
                     r_end = dt.now()
-                    out = "Config: {fwd_ptr} Data Type: {data_gen} write: {wtime} append: {atime} read: {rtime}".format(
+                    out = "Config: {fwd_ptr} Data gen: {data_gen} write: {wtime} append: {atime} read: {rtime}".format(
                         fwd_ptr=fwd_ptr,
-                        data_gen=data_gen,
+                        data_gen=data_gen.__name__,
                         wtime=w_end - w_start,
                         atime=a_end - w_end,
                         rtime=r_end - a_end,
                     )
                     pprint(out)
+                    measure.append(out)
+
+    pprint(measure)
 
 
 if __name__ == '__main__':
