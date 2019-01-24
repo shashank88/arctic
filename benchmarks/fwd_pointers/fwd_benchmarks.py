@@ -6,9 +6,8 @@ from datetime import datetime as dt
 from datetime import timedelta as td
 from pprint import pprint
 
-import numpy as np
 import pandas as pd
-from dateutil.rrule import rrule, DAILY, MINUTELY
+from dateutil.rrule import rrule, MINUTELY
 
 import arctic
 from arctic import Arctic
@@ -31,6 +30,8 @@ ONE_MIN_ATTRIBUTESS = {
     'VOLUME': (0.0, 1000.0)
 }
 
+APPEND_NROWS = 10
+
 
 class FwPointersCtx:
     def __init__(self, value_to_test, do_reconcile=False):
@@ -44,28 +45,9 @@ class FwPointersCtx:
         self.reconcile_orig_value = arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE
         arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE = self.do_reconcile
 
-        print(arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE)
-        print(arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_CFG)
-
     def __exit__(self, *args):
         arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_CFG = self.orig_value
         arctic.store._ndarray_store.ARCTIC_FORWARD_POINTERS_RECONCILE = self.reconcile_orig_value
-
-
-def gen_column(size, dense):
-    return gen_dense_col_data(size) if dense else gen_sparse_col_data(size)
-
-
-def gen_dense_col_data(size):
-    return [random.uniform(0.0, 1.0) for _ in range(size)]
-
-
-def gen_sparse_col_data(size):
-    sparse_data = []
-    for val in gen_dense_col_data(size):
-        sparse_data.append(val if val > 0.7 else np.NaN)
-
-    return sparse_data
 
 
 def gen_sparse_rows_for_range(n_rows, low, high, dense):
@@ -90,16 +72,6 @@ def gen_one_minute_rows(n_rows, dense):
     return data
 
 
-def gen_equity_dataset(n_row, n_col, dense):
-    timestamps = list(rrule(DAILY, count=n_row, dtstart=dt(2005, 1, 1), interval=1))
-    df = pd.DataFrame(
-        index=timestamps,
-        data={'BENCH' + str(i): gen_column(n_row, dense) for i in range(n_col)},
-    )
-    df.index.name = 'index'
-    return df
-
-
 def gen_oneminute_dataset(n_row, n_col, dense):
     timestamps = []
     active_minutes_daily = 120
@@ -119,7 +91,7 @@ def gen_oneminute_dataset(n_row, n_col, dense):
 
 
 def lib_name_from_args(config, data_gen):
-    return 'bench_{cfg}_{gen}'.format(
+    return 'bench2_{cfg}_{gen}'.format(
         cfg=config.name,
         gen=data_gen.__name__
     )
@@ -145,7 +117,7 @@ def append_random_rows(config, args, data_gen):
 
     for _ in range(args.appends):
         for sym in range(args.symbols):
-            df = data_gen(n_row=1, n_col=args.ndim, dense=False)
+            df = data_gen(n_row=APPEND_NROWS, n_col=args.ndim, dense=False)
             lib.append('sym' + str(sym), df)
 
 
@@ -174,27 +146,25 @@ def parse_args():
 
 def main(args):
     measure = []
-    data_generators = [
-        gen_oneminute_dataset,
-        gen_equity_dataset,
-    ]
+    data_generators = [gen_oneminute_dataset]
     print('Arguments=', args)
+
     for rounds in range(1, args.rounds + 1):
         for data_gen in data_generators:
-            for fwd_ptr in [FwPointersCfg.DISABLED, FwPointersCfg.ENABLED]:
+            for fwd_ptr in [FwPointersCfg.ENABLED, FwPointersCfg.DISABLED]:
                 with FwPointersCtx(fwd_ptr):
                     w_start = dt.now()
                     # Writes data to lib with above config.
                     insert_random_data(fwd_ptr, args, data_gen)
                     w_end = dt.now()
                     # Appends multiple rows to each symbol
-
                     append_random_rows(fwd_ptr, args, data_gen)
                     a_end = dt.now()
                     # Read everything.
                     read_all_symbols(fwd_ptr, args, data_gen)
                     r_end = dt.now()
-                    out = "Config: {fwd_ptr} Data gen: {data_gen} write: {wtime} append: {atime} read: {rtime}".format(
+                    out = "df_size: {dfsize} Config: {fwd_ptr} generator: {data_gen} write: {wtime} append: {atime} read: {rtime}".format(
+                        dfsize=args.ndim,
                         fwd_ptr=fwd_ptr,
                         data_gen=data_gen.__name__,
                         wtime=w_end - w_start,
