@@ -2,20 +2,22 @@ from __future__ import print_function
 
 import argparse
 import random
+from collections import defaultdict
 from datetime import datetime as dt
 from datetime import timedelta as td
-from pprint import pprint
 
+import numpy as np
 import pandas as pd
 from dateutil.rrule import rrule, MINUTELY
 
 import arctic
 from arctic import Arctic
 from arctic._config import FwPointersCfg
+import matplotlib.pyplot as plt
 
 price_template = (800.0, 1200.0)
 
-ONE_MIN_ATTRIBUTESS = {
+ONE_MIN_ATTRIBUTES = {
     'BID': price_template,
     'BID_TWAP': price_template,
     'ASK': price_template,
@@ -27,7 +29,7 @@ ONE_MIN_ATTRIBUTESS = {
     'ASKSIZE': (0.0, 400.0),
     'BIDSIZE': (0.0, 400.0),
     'TICK_COUNT': (1.0, 50.0),
-    'VOLUME': (0.0, 1000.0)
+    'VOLUME': (0.0, 1000.0),
 }
 
 APPEND_NROWS = 10
@@ -66,7 +68,7 @@ def gen_sparse_rows_for_range(n_rows, low, high, dense):
 
 def gen_one_minute_rows(n_rows, dense):
     data = {}
-    for header, header_range in ONE_MIN_ATTRIBUTESS.iteritems():
+    for header, header_range in ONE_MIN_ATTRIBUTES.iteritems():
         data[header] = gen_sparse_rows_for_range(n_rows, header_range[0], header_range[1], dense)
 
     return data
@@ -90,45 +92,54 @@ def gen_oneminute_dataset(n_row, n_col, dense):
     )
 
 
-def lib_name_from_args(config, data_gen):
-    return 'bench2_{cfg}_{gen}'.format(
+def lib_name_from_args(config):
+    return 'bench2_{cfg}'.format(
         cfg=config.name,
-        gen=data_gen.__name__
     )
 
 
-def insert_random_data(config, args, data_gen):
+def insert_random_data(config, args, n_rows):
     store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = lib_name_from_args(config, data_gen)
+    lib_name = lib_name_from_args(config)
     store.delete_library(lib_name)
     store.initialize_library(lib_name, segment='month')
     lib = store[lib_name]
 
     for sym in range(args.symbols):
-        df = data_gen(n_row=args.ndim, n_col=args.ndim, dense=args.dense)
+        df = gen_oneminute_dataset(n_row=n_rows, n_col=n_rows, dense=args.dense)
         lib.write('sym' + str(sym), df)
 
 
-def append_random_rows(config, args, data_gen):
+def append_random_rows(config, args, n_rows):
     store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = lib_name_from_args(config, data_gen)
+    lib_name = lib_name_from_args(config)
 
     lib = store[lib_name]
 
     for _ in range(args.appends):
         for sym in range(args.symbols):
-            df = data_gen(n_row=APPEND_NROWS, n_col=args.ndim, dense=False)
+            df = gen_oneminute_dataset(n_row=APPEND_NROWS, n_col=n_rows, dense=False)
             lib.append('sym' + str(sym), df)
 
 
-def read_all_symbols(config, args, data_gen):
+def read_all_symbols(config, args):
     store = Arctic(args.mongodb, app_name="benchmark")
-    lib_name = lib_name_from_args(config, data_gen)
+    lib_name = lib_name_from_args(config)
 
     lib = store[lib_name]
 
+    symbol_df = []
     for sym in range(args.symbols):
-        lib.read('sym' + str(sym))
+        symbol_df.append(lib.read('sym' + str(sym)))
+
+    # Basic sanity checks while reading back
+    sample_df = symbol_df[0].data
+    assert sorted(sample_df.dtypes) == ['float64'] * len(ONE_MIN_ATTRIBUTES)
+    assert 800.0 <= sample_df['BID'][0] <= 1200.0
+
+
+def mean_timedelta(timedelta_list):
+    return np.sum(timedelta_list) / len(timedelta_list)
 
 
 def parse_args():
@@ -145,36 +156,53 @@ def parse_args():
 
 
 def main(args):
-    measure = []
-    data_generators = [gen_oneminute_dataset]
+    measure = defaultdict(list)
+    data_size = [
+        100,
+        500,
+        # 1000,
+        # 5000,
+        # 10000,
+        # 200000
+    ]
     print('Arguments=', args)
 
-    for rounds in range(1, args.rounds + 1):
-        for data_gen in data_generators:
-            for fwd_ptr in [FwPointersCfg.ENABLED, FwPointersCfg.DISABLED]:
+    for fwd_ptr in [FwPointersCfg.ENABLED, FwPointersCfg.DISABLED]:
+        for n_rows in data_size:
+            for rounds in range(1, args.rounds + 1):
                 with FwPointersCtx(fwd_ptr):
                     w_start = dt.now()
                     # Writes data to lib with above config.
-                    insert_random_data(fwd_ptr, args, data_gen)
+                    insert_random_data(fwd_ptr, args, n_rows)
                     w_end = dt.now()
                     # Appends multiple rows to each symbol
-                    append_random_rows(fwd_ptr, args, data_gen)
+                    append_random_rows(fwd_ptr, args, n_rows)
                     a_end = dt.now()
                     # Read everything.
-                    read_all_symbols(fwd_ptr, args, data_gen)
+                    read_all_symbols(fwd_ptr, args)
                     r_end = dt.now()
-                    out = "df_size: {dfsize} Config: {fwd_ptr} generator: {data_gen} write: {wtime} append: {atime} read: {rtime}".format(
-                        dfsize=args.ndim,
-                        fwd_ptr=fwd_ptr,
-                        data_gen=data_gen.__name__,
-                        wtime=w_end - w_start,
-                        atime=a_end - w_end,
-                        rtime=r_end - a_end,
+                    print('read time=', r_end - a_end)
+                    measure[n_rows].append(
+                        {
+                            'dfsize': (n_rows, len(ONE_MIN_ATTRIBUTES)),
+                            'wtime': w_end - w_start,
+                            'atime': a_end - w_end,
+                            'rtime': r_end - a_end,
+                            'fwd': fwd_ptr
+                        }
                     )
-                    pprint(out)
-                    measure.append(out)
 
-    pprint(measure)
+    enabled_reads = {}
+    disabled_reads = {}
+
+    for dsize in data_size:
+        enabled_reads[dsize] = mean_timedelta(
+            [data['rtime'] for data in measure[dsize] if data['fwd'] == FwPointersCfg.ENABLED])
+        disabled_reads[dsize] = mean_timedelta(
+            [data['rtime'] for data in measure[dsize] if data['fwd'] == FwPointersCfg.DISABLED])
+
+    print('enabled read times=', enabled_reads)
+    print('disabled read times=', disabled_reads)
 
 
 if __name__ == '__main__':
