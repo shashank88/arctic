@@ -31,7 +31,7 @@ def get_library_info(name, lib_obj):
         'quota': app.arc.get_quota(name),
         'used': stats['dbstats']['storageSize'],
         'db': stats['dbstats']['db'],
-        'versions': lib_obj.list_versions(),
+        # 'versions': lib_obj.list_versions(),
         'last_used': '2019-01-01',  # TODO
     }
 

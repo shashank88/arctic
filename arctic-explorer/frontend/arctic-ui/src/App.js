@@ -71,7 +71,7 @@ class App extends Component {
               <TableCell align="right">Type</TableCell>
               <TableCell align="right">Size</TableCell>
               <TableCell align="right">Quota</TableCell>
-              <TableCell align="right">Versions</TableCell>
+              <TableCell align="right">Symbols</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -81,9 +81,9 @@ class App extends Component {
                   {lib.name}
                 </TableCell>
                 <TableCell align="right">{lib.type}</TableCell>
-                <TableCell align="right">{lib.used / 1024 / 1024} M</TableCell>
-                <TableCell align="right">{lib.quota / 1024 / 1024} M</TableCell>
-                <TableCell align="right">TODO</TableCell>
+                <TableCell align="right">{(lib.used / 1024 / 1024).toFixed(2)} M</TableCell>
+                <TableCell align="right">{(lib.quota / 1024 / 1024).toFixed(2)} M</TableCell>
+                <TableCell align="right">{lib.symbols}</TableCell>
               </TableRow>
             ))}
           </TableBody>
