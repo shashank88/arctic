@@ -25,7 +25,7 @@ def libraries():
 def get_library_info(name, lib_obj):
     stats = lib_obj.stats()
     return {
-        'symbols': lib_obj.list_symbols(),
+        'symbols': [],
         'name': name,
         'type': app.arc.get_library_type(name),
         'quota': app.arc.get_quota(name),
