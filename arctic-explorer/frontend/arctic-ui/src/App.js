@@ -20,6 +20,9 @@ const styles = theme => ({
   },
   extendedIcon: {
     marginRight: theme.spacing.unit
+  },
+  form: {
+    margin: theme.spacing.unit
   }
 });
 
@@ -76,7 +79,7 @@ class App extends Component {
             </Typography>
           </Toolbar>
         </AppBar>
-        <Table>
+        <Table style={{marginBottom: '24px'}}>
           <TableHead>
             <TableRow>
               <TableCell>Library </TableCell>
@@ -84,7 +87,9 @@ class App extends Component {
               <TableCell align="right">Size</TableCell>
               <TableCell align="right">Quota</TableCell>
               <TableCell align="right">Symbols</TableCell>
-              <TableCell align="right">Edit or Delete</TableCell>
+              <TableCell align="right">Edit</TableCell>
+              <TableCell align="right">Delete</TableCell>
+
             </TableRow>
           </TableHead>
           <TableBody>
@@ -106,13 +111,17 @@ class App extends Component {
                     <Icon>edit_icon</Icon>
                   </Fab>
 
-                  <Fab
+                  
+                </TableCell>
+                <TableCell align="right">
+                <Fab
                     aria-label="Delete"
-                    className={(styles.fab, styles.space)}
+                    className={(styles.fab)}
+                    align="right"
                   >
                     <DeleteIcon fontSize="small" />
                   </Fab>
-                </TableCell>
+                  </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -158,30 +167,39 @@ class AddLibraryForm extends React.Component {
 
   render() {
     return (
-      <form onSubmit={this.handleSubmit}>
-        <div>
-          <label>
+      <form onSubmit={this.handleSubmit} style={{paddingBottom:'40px'}}>
+        <div style={{padding: '10px 0 10px 0'}}>
+          <label style={{fontSize:'0.875rem', fontWeight:'bold'}}>
             Name:
             <input
               name="name"
               type="text"
               value={this.state.name}
               onChange={this.handleChange}
+              style={{width:'80%',padding:'10px',border:'1px solid white',fontSize:'0.875rem',backgroundColor:'#e0e0e0',color:'black'}}
             />
           </label>
         </div>
-        <div>
-          <label>
+        <div style={{padding: '0 0 10px 0'}}>
+          <label style={{fontSize:'0.875rem', fontWeight:'bold'}}>
             Type:
             <input
               name="type"
               type="text"
               value={this.state.type}
               onChange={this.handleChange}
+              style={{width:'80%',padding:'10px',border:'1px solid white',fontSize:'0.875rem',backgroundColor:'#e0e0e0',color:'black'}}
             />
           </label>
         </div>
-        <input type="submit" value="Submit" />
+        <Button
+            type="submit"
+            value="Submit"
+            variant="contained"
+            color="secondary"
+          >
+          Submit
+          </Button>
       </form>
     );
   }
